@@ -279,14 +279,19 @@
         const startScanBtn = document.getElementById('start-scan');
         const stopScanBtn = document.getElementById('stop-scan');
 
-        // Initialize the scanner
+        // Initialize the scanner with optimized settings for high volume
         function initScanner() {
             html5QrcodeScanner = new Html5QrcodeScanner(
                 "qr-reader",
                 {
-                    fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.0
+                    fps: 30,                    // Higher FPS for faster scanning
+                    qrbox: { width: 300, height: 300 }, // Larger scanning area
+                    aspectRatio: 1.0,
+                    supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+                    showTorchButtonIfSupported: true,  // Flashlight for better scanning
+                    showZoomSliderIfSupported: true,   // Zoom control
+                    defaultZoomValueIfSupported: 2,    // Default zoom level
+                    useBarCodeDetectorIfSupported: true // Use native barcode detection
                 },
                 false
             );
@@ -334,24 +339,50 @@
             console.log('Scan attempt failed:', error);
         }
 
-        // Check payment status via API
+        // Check payment status via API with timeout and retry logic
         async function checkPaymentStatus(srn) {
-            try {
-                const url = `${API_BASE_URL}?SRN=${encodeURIComponent(srn)}`;
-                console.log('Making API request to:', url);
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                console.log('API response:', data);
-                
-                // Show result
-                showResult(data, srn);
-                
-            } catch (error) {
-                console.error('API request failed:', error);
-                showError('Failed to check payment status. Please try again.');
-                resumeScanning();
+            const maxRetries = 3;
+            const timeout = 5000; // 5 second timeout
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const url = `${API_BASE_URL}?SRN=${encodeURIComponent(srn)}`;
+                    console.log(`API request attempt ${attempt}:`, url);
+                    
+                    // Create timeout promise
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Request timeout')), timeout)
+                    );
+                    
+                    // Race between fetch and timeout
+                    const response = await Promise.race([
+                        fetch(url),
+                        timeoutPromise
+                    ]);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    console.log('API response:', data);
+                    
+                    // Show result
+                    showResult(data, srn);
+                    return; // Success, exit retry loop
+                    
+                } catch (error) {
+                    console.error(`API request attempt ${attempt} failed:`, error);
+                    
+                    if (attempt === maxRetries) {
+                        // All retries failed
+                        showError(`Failed to check payment status after ${maxRetries} attempts. Please try again.`);
+                        resumeScanning();
+                    } else {
+                        // Wait before retry (exponential backoff)
+                        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                    }
+                }
             }
         }
 
@@ -395,11 +426,11 @@
             // Show modal
             resultContainer.style.display = 'flex';
             
-            // Auto-hide after 3 seconds
+            // Auto-hide after 2 seconds for faster throughput
             setTimeout(() => {
                 hideResult();
                 resumeScanning();
-            }, 3000);
+            }, 2000);
         }
 
         // Hide result modal
@@ -538,4 +569,3 @@
     </script>
 </body>
 </html>
-
