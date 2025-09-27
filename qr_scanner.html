@@ -407,6 +407,10 @@
                 isPaid = false;
                 resultText = 'NOT FOUND';
                 statusText = 'DENY ENTRY';
+            } else if (apiData.result === 'Already Scanned') {
+                isPaid = false;
+                resultText = 'ALREADY SCANNED';
+                statusText = 'DENY ENTRY';
             } else {
                 // Handle other cases
                 isPaid = false;
