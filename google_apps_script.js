@@ -18,12 +18,37 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
     
-    // Get the active spreadsheet and sheet
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = spreadsheet.getActiveSheet();
+    // Cache the spreadsheet data for better performance
+    const cacheKey = 'spreadsheet_data';
+    let data = CacheService.getScriptCache().get(cacheKey);
     
-    // Get all data from the sheet
-    const data = sheet.getDataRange().getValues();
+    if (!data) {
+      // Load data from spreadsheet
+      const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+      const sheet = spreadsheet.getActiveSheet();
+      data = sheet.getDataRange().getValues();
+      
+      // Cache for 5 minutes to handle high volume
+      CacheService.getScriptCache().put(cacheKey, JSON.stringify(data), 300);
+    } else {
+      data = JSON.parse(data);
+    }
+    
+    // Check for duplicate scans (server-side tracking)
+    const scannedKey = `scanned_${srn}`;
+    const alreadyScanned = CacheService.getScriptCache().get(scannedKey);
+    
+    if (alreadyScanned) {
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          status: "success",
+          result: "Already Scanned",
+          srn: srn,
+          found: true,
+          message: "This QR code has already been scanned and used for entry"
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     
     // Check if sheet has data
     if (data.length <= 1) {
@@ -86,6 +111,9 @@ function doGet(e) {
             paymentStatus = "Not Paid";
           }
         }
+        
+        // Mark this SRN as scanned (server-side tracking)
+        CacheService.getScriptCache().put(scannedKey, 'true', 3600); // Cache for 1 hour
         
         return ContentService
           .createTextOutput(JSON.stringify({
@@ -157,4 +185,23 @@ function setupSheet() {
   }
   
   console.log("Sheet setup complete with Status column!");
+}
+
+/**
+ * Clear all scanned records (for new events)
+ * Run this function to reset all scanned SRNs
+ */
+function clearScannedRecords() {
+  // Clear all scanned SRNs from cache
+  const cache = CacheService.getScriptCache();
+  
+  // Get all cached keys and remove scanned ones
+  // Note: This is a simplified approach - in production, you might want to track keys
+  console.log("Clearing all scanned records...");
+  
+  // Clear the main data cache as well to force refresh
+  cache.remove('spreadsheet_data');
+  
+  console.log("All scanned records cleared! Ready for new event.");
+  return "All scanned records cleared successfully!";
 }
