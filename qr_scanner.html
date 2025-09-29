@@ -258,13 +258,12 @@
 
     <script>
         // Configuration
-        const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbztzes-_hTHObcG9udOPQFn05QnfD8bWO_nm1Tlh66rxOkkhI6IFfsNz_mvIOmDcDWQYg/exec';
+        const API_BASE_URL = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
         
         // Global variables
         let html5QrcodeScanner = null;
         let isScanning = false;
-        let scannedRecords = []; // Track scanned SRNs with timestamps: [{srn: string, timestamp: number}]
-        const ONE_HOUR_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+        let scannedSRNs = new Set(); // Track scanned SRNs to prevent duplicates
 
         // DOM elements
         const qrReader = document.getElementById('qr-reader');
@@ -279,12 +278,6 @@
         const resultStatus = document.getElementById('result-status');
         const startScanBtn = document.getElementById('start-scan');
         const stopScanBtn = document.getElementById('stop-scan');
-
-        // Clean old records (older than 1 hour)
-        function cleanOldRecords() {
-            const now = Date.now();
-            scannedRecords = scannedRecords.filter(record => now - record.timestamp < ONE_HOUR_MS);
-        }
 
         // Initialize the scanner with optimized settings for high volume
         function initScanner() {
@@ -315,19 +308,15 @@
             // Extract SRN from the scanned data
             const srn = decodedText.trim();
             
-            // Clean old records and check if this SRN has already been scanned within the last hour
-            cleanOldRecords();
-            const now = Date.now();
-            const recentScan = scannedRecords.find(record => record.srn === srn && now - record.timestamp < ONE_HOUR_MS);
-            
-            if (recentScan) {
-                showError(`QR Code already scanned within the last hour! SRN: ${srn} (Last scanned: ${new Date(recentScan.timestamp).toLocaleTimeString()}).`);
-                return; // Don't process duplicate scans within time window
+            // Check if this SRN has already been scanned
+            if (scannedSRNs.has(srn)) {
+                showError(`QR Code already scanned! SRN: ${srn} has been used before.`);
+                return; // Don't process duplicate scans
             }
             
-            // Add SRN record with timestamp and save to localStorage
-            scannedRecords.push({ srn, timestamp: now });
-            saveScannedRecords();
+            // Add SRN to scanned set and save to localStorage
+            scannedSRNs.add(srn);
+            saveScannedSRNs();
             
             // Stop scanning temporarily
             if (html5QrcodeScanner) {
@@ -513,41 +502,36 @@
         startScanBtn.addEventListener('click', startScanning);
         stopScanBtn.addEventListener('click', stopScanning);
         document.getElementById('request-permission').addEventListener('click', requestCameraPermission);
-        document.getElementById('clear-scanned').addEventListener('click', clearScannedRecords);
+        document.getElementById('clear-scanned').addEventListener('click', clearScannedSRNs);
 
-        // Load scanned records from localStorage
-        function loadScannedRecords() {
+        // Load scanned SRNs from localStorage
+        function loadScannedSRNs() {
             const stored = localStorage.getItem('scannedSRNs');
             if (stored) {
-                const records = JSON.parse(stored);
-                // Filter out old records on load
-                cleanOldRecords(); // This will filter the parsed records
-                scannedRecords = records.filter(record => Date.now() - record.timestamp < ONE_HOUR_MS);
-                console.log(`Loaded ${scannedRecords.length} valid scanned records (older than 1 hour removed)`);
+                scannedSRNs = new Set(JSON.parse(stored));
+                console.log(`Loaded ${scannedSRNs.size} previously scanned SRNs`);
             }
         }
 
-        // Save scanned records to localStorage
-        function saveScannedRecords() {
-            // Clean old records before saving to keep storage tidy
-            cleanOldRecords();
-            localStorage.setItem('scannedSRNs', JSON.stringify(scannedRecords));
+        // Save scanned SRNs to localStorage
+        function saveScannedSRNs() {
+            localStorage.setItem('scannedSRNs', JSON.stringify([...scannedSRNs]));
         }
 
-        // Clear all scanned records (for new event)
-        function clearScannedRecords() {
-            scannedRecords = [];
+        // Clear all scanned SRNs (for new event)
+        function clearScannedSRNs() {
+            scannedSRNs.clear();
             localStorage.removeItem('scannedSRNs');
             showSuccess('All scanned records cleared. Ready for new event!');
         }
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
-            // Load previously scanned records (with cleanup)
-            loadScannedRecords();
+            // Load previously scanned SRNs
+            loadScannedSRNs();
             
             // Check if camera is supported
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUser Media) {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 showError('Camera not supported on this device. Please use a device with a camera.');
                 return;
             }
@@ -560,7 +544,7 @@
         async function requestCameraPermission() {
             try {
                 // Request camera access
-                const stream = await navigator.mediaDevices.getUser Media({ 
+                const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: 'environment' // Use back camera
                     } 
